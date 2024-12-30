@@ -29,8 +29,9 @@ class VideoCallApp extends StatelessWidget {
 
     // return material app
     return MaterialApp(
-      darkTheme: ThemeData.dark().copyWith(
+      darkTheme: ThemeData.dark(
         useMaterial3: true,
+      ).copyWith(
         colorScheme: const ColorScheme.dark(),
       ),
       themeMode: ThemeMode.dark,

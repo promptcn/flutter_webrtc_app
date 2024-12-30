@@ -64,11 +64,6 @@ class _CallScreenState extends State<CallScreen> {
       // 'iceServers': [
       //   {
       //     'urls': ['stun.voipbuster.com', 'stun.voipstunt.com']
-      //     // 'urls': [
-      //     //   'stun:stun.qq.com:3478',
-      //     //   'stun:stun.miwifi.com:3478',
-      //     //   'stun:stun.chat.bilibili.com:3478'
-      //     // ]
       //   }
       // ]
     });
