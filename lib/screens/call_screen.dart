@@ -277,62 +277,24 @@ class _CallScreenState extends State<CallScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).colorScheme.background,
       appBar: AppBar(
-        title: const Text("P2P Call App"),
+        title: Text("观看屏幕共享 - ${widget.calleeId}"),
       ),
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
-              child: Stack(children: [
-                RTCVideoView(
-                  _remoteRTCVideoRenderer,
-                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                  // 添加键值以便调试
-                  key: const Key('remoteVideo'),
-                ),
-                Positioned(
-                  right: 20,
-                  bottom: 20,
-                  child: SizedBox(
-                    height: 150,
-                    width: 120,
-                    child: RTCVideoView(
-                      _localRTCVideoRenderer,
-                      mirror: isFrontCameraSelected,
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                      // 添加键值以便调试
-                      key: const Key('localVideo'),
-                    ),
-                  ),
-                )
-              ]),
+              child: RTCVideoView(
+                _remoteRTCVideoRenderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  IconButton(
-                    icon: Icon(isAudioOn ? Icons.mic : Icons.mic_off),
-                    onPressed: _toggleMic,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.call_end),
-                    iconSize: 30,
-                    onPressed: _leaveCall,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.cameraswitch),
-                    onPressed: _switchCamera,
-                  ),
-                  IconButton(
-                    icon: Icon(isVideoOn ? Icons.videocam : Icons.videocam_off),
-                    onPressed: _toggleCamera,
-                  ),
-                ],
+              child: IconButton(
+                icon: const Icon(Icons.call_end),
+                iconSize: 30,
+                onPressed: _leaveCall,
               ),
             ),
           ],
