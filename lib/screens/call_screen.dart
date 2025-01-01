@@ -57,25 +57,55 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   _setupPeerConnection() async {
-    // 添加连接状态变化日志
     print('开始建立点对点连接...');
 
     _rtcPeerConnection = await createPeerConnection({
-      // 'iceServers': [
-      //   {
-      //     'urls': ['stun.voipbuster.com', 'stun.voipstunt.com']
-      //   }
-      // ]
+      'iceServers': [],
+      'sdpSemantics': 'unified-plan',
+      'iceTransportPolicy': 'all',
     });
 
+    // 添加更多事件监听
+    _rtcPeerConnection!.onAddStream = (MediaStream stream) {
+      print('收到远程流');
+      setState(() {
+        _remoteRTCVideoRenderer.srcObject = stream;
+      });
+    };
+
+    _rtcPeerConnection!.onTrack = (RTCTrackEvent event) {
+      print('手机端 - onTrack触发');
+      print('手机端 - 轨道类型: ${event.track.kind}');
+      print('手机端 - 轨道ID: ${event.track.id}');
+
+      if (event.streams.isNotEmpty) {
+        print('手机端 - 收到远程流');
+        setState(() {
+          _remoteRTCVideoRenderer.srcObject = event.streams[0];
+        });
+
+        // 监听流状态
+        event.streams[0].onAddTrack = (MediaStreamTrack track) {
+          print('手机端 - 流添加轨道: ${track.kind}');
+        };
+
+        event.streams[0].onRemoveTrack = (MediaStreamTrack track) {
+          print('手机端 - 流移除轨道: ${track.kind}');
+        };
+      }
+    };
+
     // 监听连接状态变化
-    _rtcPeerConnection!.onConnectionState = (RTCPeerConnectionState state) {
-      print('连接状态变化: $state');
+    _rtcPeerConnection!.onConnectionState = (state) {
+      print('手机端 - 连接状态变化: $state');
     };
 
     // 监听 ICE 连接状态
-    _rtcPeerConnection!.onIceConnectionState = (RTCIceConnectionState state) {
-      print('ICE 连接状态: $state');
+    _rtcPeerConnection!.onIceConnectionState = (state) {
+      print('手机端 - ICE连接状态: $state');
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        print('手机端 - ICE连接失败，尝试重新协商...');
+      }
     };
 
     // 监听 ICE 候选者收集状态
@@ -85,18 +115,6 @@ class _CallScreenState extends State<CallScreen> {
 
     _rtcPeerConnection!.onSignalingState = (RTCSignalingState state) {
       print('信令状态变化: $state');
-    };
-
-    _rtcPeerConnection!.onTrack = (event) {
-      print('收到远端媒体流轨道');
-      print('轨道类型: ${event.track.kind}'); // 'video' 或 'audio'
-      print('轨道状态: ${event.track.enabled}');
-      print('媒体流ID: ${event.streams[0].id}');
-
-      // 确保在主线程中更新 UI
-      setState(() {
-        _remoteRTCVideoRenderer.srcObject = event.streams[0];
-      });
     };
 
     // 获取本地媒体流时添加日志
@@ -121,6 +139,14 @@ class _CallScreenState extends State<CallScreen> {
     _localRTCVideoRenderer.srcObject = _localStream;
     setState(() {});
 
+    _remoteRTCVideoRenderer.onFirstFrameRendered = () {
+      print('远程视频第一帧已渲染');
+    };
+
+    _localRTCVideoRenderer.onFirstFrameRendered = () {
+      print('本地视频第一帧已渲染');
+    };
+
     // for Incoming call
     if (widget.offer != null) {
       print('处理来电请求...');
@@ -139,18 +165,22 @@ class _CallScreenState extends State<CallScreen> {
       };
 
       // listen for Remote IceCandidate
-      socket!.on("IceCandidate", (data) {
-        print('收到远端 ICE candidate');
-        String candidate = data["iceCandidate"]["candidate"];
-        String sdpMid = data["iceCandidate"]["id"];
-        int sdpMLineIndex = data["iceCandidate"]["label"];
+      socket!.on("IceCandidate", (data) async {
+        print('手机端 - 收到远端ICE候选者');
+        try {
+          String candidate = data["iceCandidate"]["candidate"];
+          String sdpMid = data["iceCandidate"]["id"];
+          int sdpMLineIndex = data["iceCandidate"]["label"];
 
-        // add iceCandidate
-        _rtcPeerConnection!.addCandidate(RTCIceCandidate(
-          candidate,
-          sdpMid,
-          sdpMLineIndex,
-        ));
+          await _rtcPeerConnection!.addCandidate(RTCIceCandidate(
+            candidate,
+            sdpMid,
+            sdpMLineIndex,
+          ));
+          print('手机端 - 成功添加ICE候选者');
+        } catch (e) {
+          print('手机端 - 添加ICE候选者失败: $e');
+        }
       });
 
       // set SDP offer as remoteDescription for peerConnection
@@ -251,11 +281,8 @@ class _CallScreenState extends State<CallScreen> {
     setState(() {});
   }
 
-  _toggleCamera() {
-    // change status
+  _toggleVideo() async {
     isVideoOn = !isVideoOn;
-
-    // enable or disable video track
     _localStream?.getVideoTracks().forEach((track) {
       track.enabled = isVideoOn;
     });
@@ -274,27 +301,115 @@ class _CallScreenState extends State<CallScreen> {
     setState(() {});
   }
 
+  void _toggleAudio() {
+    isAudioOn = !isAudioOn;
+    _localStream?.getAudioTracks().forEach((track) {
+      track.enabled = isAudioOn;
+    });
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("观看屏幕共享 - ${widget.calleeId}"),
-      ),
+      backgroundColor: Colors.black87,
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
-              child: RTCVideoView(
-                _remoteRTCVideoRenderer,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              child: Stack(
+                children: [
+                  // 远程视频（全屏）
+                  RTCVideoView(
+                    _remoteRTCVideoRenderer,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    mirror: false,
+                  ),
+                  // 本地视频（小窗口）
+                  Positioned(
+                    right: 20,
+                    bottom: 20,
+                    child: Container(
+                      height: 150,
+                      width: 120,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.white),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: RTCVideoView(
+                          _localRTCVideoRenderer,
+                          mirror: true,
+                          objectFit:
+                              RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 调试信息
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    child: Container(
+                      padding: EdgeInsets.all(8),
+                      color: Colors.black45,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '本地视频: ${_localRTCVideoRenderer.srcObject != null}',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                          Text(
+                            '远程视频: ${_remoteRTCVideoRenderer.srcObject != null}',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: IconButton(
-                icon: const Icon(Icons.call_end),
-                iconSize: 30,
-                onPressed: _leaveCall,
+            // 控制按钮
+            Container(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              color: Colors.black54,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      isAudioOn ? Icons.mic : Icons.mic_off,
+                      color: Colors.white,
+                    ),
+                    onPressed: _toggleAudio,
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      isVideoOn ? Icons.videocam : Icons.videocam_off,
+                      color: Colors.white,
+                    ),
+                    onPressed: _toggleVideo,
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.call_end,
+                      color: Colors.red,
+                    ),
+                    onPressed: _leaveCall,
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      isFrontCameraSelected
+                          ? Icons.camera_front
+                          : Icons.camera_rear,
+                      color: Colors.white,
+                    ),
+                    onPressed: _switchCamera,
+                  ),
+                ],
               ),
             ),
           ],

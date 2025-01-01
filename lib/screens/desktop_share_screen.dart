@@ -25,49 +25,110 @@ class _DesktopShareScreenState extends State<DesktopShareScreen> {
   }
 
   Future<void> _setupConnection() async {
+    print('开始设置桌面共享连接...');
+
     // 获取屏幕共享流
-    _localStream = await navigator.mediaDevices.getDisplayMedia({
-      'video': true,
-      'audio': false,
-    });
+    try {
+      _localStream = await navigator.mediaDevices.getDisplayMedia({
+        'video': true,
+        'audio': false,
+      });
+      print('成功获取屏幕共享流');
+      print('视频轨道数量: ${_localStream!.getVideoTracks().length}');
+    } catch (e) {
+      print('获取屏幕共享流失败: $e');
+      return;
+    }
 
     _localRenderer.srcObject = _localStream;
     setState(() {});
 
     // 处理来电
     socket!.on("newCall", (data) async {
+      print('收到新的呼叫请求');
       final callerId = data["callerId"];
 
-      _peerConnection = await createPeerConnection({});
+      try {
+        _peerConnection = await createPeerConnection({
+          'iceServers': [],
+          'sdpSemantics': 'unified-plan',
+          'iceTransportPolicy': 'all',
+        });
 
-      // 添加屏幕共享轨道
-      _localStream!.getTracks().forEach((track) {
-        _peerConnection!.addTrack(track, _localStream!);
-      });
+        // 添加 ICE 候选者处理
+        socket!.on("IceCandidate", (data) async {
+          print('桌面端 - 收到远端ICE候选者');
+          try {
+            String candidate = data["iceCandidate"]["candidate"];
+            String sdpMid = data["iceCandidate"]["id"];
+            int sdpMLineIndex = data["iceCandidate"]["label"];
 
-      // 处理ICE候选
-      _peerConnection!.onIceCandidate = (candidate) {
-        socket!.emit("IceCandidate", {
-          "calleeId": callerId,
-          "iceCandidate": {
-            "id": candidate.sdpMid,
-            "label": candidate.sdpMLineIndex,
-            "candidate": candidate.candidate
+            await _peerConnection!.addCandidate(RTCIceCandidate(
+              candidate,
+              sdpMid,
+              sdpMLineIndex,
+            ));
+            print('桌面端 - 成功添加ICE候选者');
+          } catch (e) {
+            print('桌面端 - 添加ICE候选者失败: $e');
           }
         });
-      };
 
-      // 设置远程描述并创建应答
-      await _peerConnection!.setRemoteDescription(RTCSessionDescription(
-          data["sdpOffer"]["sdp"], data["sdpOffer"]["type"]));
+        // 添加更多事件监听
+        _peerConnection!.onTrack = (RTCTrackEvent event) {
+          print('桌面端 - onTrack触发');
+          print('桌面端 - 轨道类型: ${event.track.kind}');
+        };
 
-      final answer = await _peerConnection!.createAnswer();
-      await _peerConnection!.setLocalDescription(answer);
+        // 添加更详细的连接状态监控
+        _peerConnection!.onConnectionState = (state) {
+          print('桌面端 - 连接状态变化: $state');
+        };
 
-      socket!.emit("answerCall", {
-        "callerId": callerId,
-        "sdpAnswer": answer.toMap(),
-      });
+        _peerConnection!.onIceConnectionState = (state) {
+          print('桌面端 - ICE连接状态: $state');
+          if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+            print('桌面端 - ICE连接失败，尝试重新协商...');
+          }
+        };
+
+        _peerConnection!.onIceGatheringState = (state) {
+          print('桌面端 - ICE收集状态: $state');
+        };
+
+        _peerConnection!.onIceCandidate = (candidate) {
+          print('桌面端 - 发送ICE候选者: ${candidate.candidate}');
+          socket!.emit("IceCandidate", {
+            "calleeId": callerId,
+            "iceCandidate": {
+              "id": candidate.sdpMid,
+              "label": candidate.sdpMLineIndex,
+              "candidate": candidate.candidate
+            }
+          });
+        };
+
+        // 修改添加轨道的方式
+        _localStream!.getTracks().forEach((track) {
+          print('桌面端 - 添加轨道: ${track.kind}, id: ${track.id}');
+          final sender = _peerConnection!.addTrack(track, _localStream!);
+          print('桌面端 - 轨道发送器创建成功: ${sender != null}');
+        });
+
+        // 设置远程描述并创建应答
+        await _peerConnection!.setRemoteDescription(RTCSessionDescription(
+            data["sdpOffer"]["sdp"], data["sdpOffer"]["type"]));
+
+        final answer = await _peerConnection!.createAnswer();
+        await _peerConnection!.setLocalDescription(answer);
+
+        socket!.emit("answerCall", {
+          "callerId": callerId,
+          "sdpAnswer": answer.toMap(),
+        });
+      } catch (e) {
+        print('设置PeerConnection失败: $e');
+      }
     });
   }
 
